@@ -121,7 +121,7 @@ e2e-auth:
 		exit 1; \
 	fi
 	@rc=0; \
-	uv run --package aegra-api pytest libs/aegra-api/tests/e2e/manual_auth_tests/ -v --tb=short -m auth_only || rc=$$?; \
+	uv run --package aegra-api pytest libs/aegra-api/tests/e2e/manual_auth_tests/ -v --tb=short -m auth_only -o addopts="--strict-markers -ra --color=yes" || rc=$$?; \
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.auth.yml down; \
 	exit $$rc
 

@@ -380,10 +380,24 @@ class TestStreamingService:
 
     @pytest.mark.asyncio
     async def test_cleanup_run(self) -> None:
-        """Test run cleanup"""
+        """Test run cleanup removes event counter and cleans broker"""
         service = StreamingService()
         run_id = "run-123"
+
+        service.event_counters[run_id] = 42
 
         with patch("aegra_api.services.streaming_service.broker_manager") as mock_manager:
             await service.cleanup_run(run_id)
             mock_manager.cleanup_broker.assert_called_with(run_id)
+            assert run_id not in service.event_counters
+
+    @pytest.mark.asyncio
+    async def test_cleanup_run_no_counter(self) -> None:
+        """Test cleanup_run is safe when no counter exists for the run"""
+        service = StreamingService()
+        run_id = "run-never-tracked"
+
+        with patch("aegra_api.services.streaming_service.broker_manager") as mock_manager:
+            await service.cleanup_run(run_id)
+            mock_manager.cleanup_broker.assert_called_with(run_id)
+            assert run_id not in service.event_counters

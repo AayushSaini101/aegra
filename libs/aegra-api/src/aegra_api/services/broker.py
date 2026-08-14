@@ -156,14 +156,19 @@ class BrokerManager(BaseBrokerManager):
         return self._event_counters.get(run_id, 0)
 
     async def _cleanup_old_brokers(self) -> None:
-        """Remove finished brokers older than 1 hour every 5 minutes."""
+        """Remove finished brokers older than 5 minutes every 60 seconds.
+
+        Replay is only needed for SSE reconnection which happens within
+        seconds, not hours. The previous 1-hour retention caused replay
+        buffers to accumulate under sustained load.
+        """
         while True:
             try:
-                await asyncio.sleep(300)
+                await asyncio.sleep(60)
                 to_remove = [
                     run_id
                     for run_id, broker in self._brokers.items()
-                    if broker.is_finished() and broker.is_empty() and broker.get_age() > 3600
+                    if broker.is_finished() and broker.is_empty() and broker.get_age() > 300
                 ]
                 for run_id in to_remove:
                     self.remove_broker(run_id)

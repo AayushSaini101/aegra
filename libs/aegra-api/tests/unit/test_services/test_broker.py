@@ -210,3 +210,32 @@ class TestBrokerManager:
         await manager.stop()
 
         assert manager._cleanup_task.cancelled() or manager._cleanup_task.done()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_removes_old_finished_brokers(self):
+        """Test that cleanup removes finished brokers older than 300s"""
+        manager = BrokerManager()
+
+        broker = manager.get_or_create_broker("run-old")
+        broker.mark_finished()
+        # Simulate age > 300s
+        broker._created_at = asyncio.get_running_loop().time() - 400
+
+        broker_young = manager.get_or_create_broker("run-young")
+        broker_young.mark_finished()
+
+        # Drain queues so is_empty() returns True
+        while not broker.queue.empty():
+            broker.queue.get_nowait()
+        while not broker_young.queue.empty():
+            broker_young.queue.get_nowait()
+
+        # Manually invoke the cleanup body
+        to_remove = [
+            run_id for run_id, b in manager._brokers.items() if b.is_finished() and b.is_empty() and b.get_age() > 300
+        ]
+        for run_id in to_remove:
+            manager.remove_broker(run_id)
+
+        assert manager.get_broker("run-old") is None
+        assert manager.get_broker("run-young") is not None

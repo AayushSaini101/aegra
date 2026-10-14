@@ -154,6 +154,12 @@ langfuse.score(
 
 No extra API call to Aegra is needed to discover the trace.
 
+### Ratio sampling
+
+`OTEL_TRACES_SAMPLER=parentbased_traceidratio` (and `traceidratio`) still work. Stock `TraceIdRatioBased` reads the low 64 bits of `trace_id`, but UUID v4 values always land those bits in the 50–75% band — so a rate of `0.1` would drop every run and `0.75` would keep every run.
+
+Aegra installs a uniform-bit ratio sampler that keeps `trace_id == UUID(run_id).int` for Langfuse linking and hashes the id before applying the ratio bound, so `OTEL_TRACES_SAMPLER_ARG` behaves as a true probability again.
+
 ### Upstream W3C `traceparent`
 
 Each run starts its own trace — Aegra does **not** continue an incoming W3C `traceparent` from an API gateway or proxy. The deterministic `trace_id` always takes precedence.

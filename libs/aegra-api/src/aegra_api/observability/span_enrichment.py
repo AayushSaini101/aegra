@@ -23,11 +23,16 @@ Usage::
 
 import contextvars
 import logging
+import secrets
+import uuid as _uuid
 from typing import Any
 
 import structlog
+from opentelemetry import context as otel_context
+from opentelemetry import trace
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
+from opentelemetry.sdk.trace.id_generator import IdGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +47,10 @@ _PRIMITIVE_ATTR_TYPES: tuple[type, ...] = (str, int, float, bool)
 _trace_attrs: contextvars.ContextVar[dict[str, str | int | float | bool] | None] = contextvars.ContextVar(
     "aegra_otel_trace_attrs", default=None
 )
+
+# When set, RunIdAwareIdGenerator returns this int as trace_id for every
+# root span created in the run's task context (sticky for the task lifetime).
+_run_trace_id: contextvars.ContextVar[int | None] = contextvars.ContextVar("aegra_run_trace_id", default=None)
 
 
 class SpanEnrichmentProcessor(SpanProcessor):
@@ -167,6 +176,55 @@ def merge_run_metadata(
     return merged
 
 
+def seed_otel_trace_id(run_id: str) -> None:
+    """Seed OTEL ``trace_id`` from ``run_id`` for the current task context.
+
+    Sets ``_run_trace_id`` so :class:`RunIdAwareIdGenerator` returns
+    ``UUID(run_id).int`` from ``generate_trace_id()``. The seed is sticky
+    for the task lifetime so factory setup spans and the graph root share
+    the same deterministic id (one-shot consume would let setup steal it).
+
+    Must be called inside a task-scoped context before spans are created.
+    """
+    _run_trace_id.set(_uuid.UUID(run_id).int)
+
+
+def prepare_run_otel_trace(run_id: str) -> None:
+    """Clear ambient OTEL parents and seed deterministic ``trace_id``.
+
+    Attaches ``INVALID_SPAN`` so the next span is a true root and
+    ``IdGenerator.generate_trace_id()`` runs (child spans skip it).
+    The attach token is intentionally not detached — callers must invoke
+    this only inside a short-lived ``ctx.run(...)`` or per-job asyncio task.
+    """
+    otel_context.attach(trace.set_span_in_context(trace.INVALID_SPAN))
+    seed_otel_trace_id(run_id)
+
+
+class RunIdAwareIdGenerator(IdGenerator):
+    """IdGenerator that derives ``trace_id`` from ``run_id`` when seeded.
+
+    While ``_run_trace_id`` is set (via :func:`seed_otel_trace_id`), every
+    root span in that context gets ``UUID(run_id).int``. Falls back to
+    random generation outside a run context.
+    """
+
+    def generate_trace_id(self) -> int:
+        seeded = _run_trace_id.get()
+        if seeded is not None:
+            return seeded
+        trace_id = secrets.randbits(128)
+        while trace_id == trace.INVALID_TRACE_ID:
+            trace_id = secrets.randbits(128)
+        return trace_id
+
+    def generate_span_id(self) -> int:
+        span_id = secrets.randbits(64)
+        while span_id == trace.INVALID_SPAN_ID:
+            span_id = secrets.randbits(64)
+        return span_id
+
+
 def make_run_trace_context(
     run_id: str,
     thread_id: str,
@@ -196,6 +254,7 @@ def make_run_trace_context(
     }
     metadata = merge_run_metadata(extra_metadata, system_metadata)
     ctx = contextvars.copy_context()
+    ctx.run(prepare_run_otel_trace, run_id)
     ctx.run(
         set_trace_context,
         user_id=user_identity,

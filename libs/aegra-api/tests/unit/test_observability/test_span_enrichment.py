@@ -15,8 +15,9 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
-from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
+from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, get_current_span
 
+from aegra_api.observability.sampling import configure_trace_id_from_run_id, reset_trace_id_seeding_for_tests
 from aegra_api.observability.span_enrichment import (
     RunIdAwareIdGenerator,
     SpanEnrichmentProcessor,
@@ -224,9 +225,15 @@ class TestMakeRunTraceContext:
 
     def setup_method(self) -> None:
         """Reset context vars before each test."""
+        reset_trace_id_seeding_for_tests()
+        configure_trace_id_from_run_id(enabled_by_settings=True)
         _trace_attrs.set(None)
         _run_trace_id.set(None)
         structlog.contextvars.clear_contextvars()
+
+    def teardown_method(self) -> None:
+        _run_trace_id.set(None)
+        reset_trace_id_seeding_for_tests()
 
     def test_returned_context_contains_expected_attributes(self) -> None:
         """Returned context has all trace attributes pre-set."""
@@ -330,10 +337,13 @@ class TestRunIdAwareIdGenerator:
     """Tests for deterministic trace_id seeding."""
 
     def setup_method(self) -> None:
+        reset_trace_id_seeding_for_tests()
+        configure_trace_id_from_run_id(enabled_by_settings=True)
         _run_trace_id.set(None)
 
     def teardown_method(self) -> None:
         _run_trace_id.set(None)
+        reset_trace_id_seeding_for_tests()
 
     def test_returns_seeded_trace_id_without_consuming(self) -> None:
         """Sticky seed: factory + graph roots both get UUID(run_id).int."""
@@ -494,6 +504,8 @@ class TestSpanEnrichmentEndToEnd:
     """
 
     def setup_method(self) -> None:
+        reset_trace_id_seeding_for_tests()
+        configure_trace_id_from_run_id(enabled_by_settings=True)
         _trace_attrs.set(None)
         _run_trace_id.set(None)
         self.exporter = InMemorySpanExporter()
@@ -508,6 +520,7 @@ class TestSpanEnrichmentEndToEnd:
         self.provider.shutdown()
         _trace_attrs.set(None)
         _run_trace_id.set(None)
+        reset_trace_id_seeding_for_tests()
 
     def _emit_root_span(self, ctx: contextvars.Context) -> None:
         """Open and close a root span inside the supplied context."""
@@ -677,3 +690,24 @@ class TestSpanEnrichmentEndToEnd:
             assert attrs["langfuse.session.id"] == "thread-1"
             assert attrs["langfuse.trace.name"] == "my_graph"
             assert attrs["langfuse.trace.metadata.run_id"] == _RUN_ID
+
+    @pytest.mark.asyncio
+    async def test_concurrent_runs_each_keep_own_seeded_trace_id(self) -> None:
+        """Two concurrent runs: each root trace_id equals its own run_id (#692)."""
+        run_a = "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"
+        run_b = "bbbbbbbb-2222-3333-4444-cccccccccccc"
+
+        async def _execute(run_id: str) -> int:
+            await asyncio.sleep(0)
+            with self.tracer.start_as_current_span(f"root-{run_id}"):
+                return get_current_span().get_span_context().trace_id
+
+        ctx_a = make_run_trace_context(run_a, "thread-1", "my_graph", "user-1")
+        ctx_b = make_run_trace_context(run_b, "thread-1", "my_graph", "user-1")
+        task_a = asyncio.create_task(_execute(run_a), context=ctx_a)
+        task_b = asyncio.create_task(_execute(run_b), context=ctx_b)
+        tid_a, tid_b = await asyncio.gather(task_a, task_b)
+
+        assert tid_a == uuid.UUID(run_a).int
+        assert tid_b == uuid.UUID(run_b).int
+        assert tid_a != tid_b

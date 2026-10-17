@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aegra_api.observability.otel import OpenTelemetryProvider
-from aegra_api.observability.sampling import get_run_aware_sampler
 from aegra_api.observability.span_enrichment import RunIdAwareIdGenerator
 from aegra_api.observability.targets import (
     BaseOtelTarget,
@@ -137,6 +136,7 @@ class TestOpenTelemetryProviderSetup:
             # Setup defaults
             mock_settings.observability.OTEL_SERVICE_NAME = "test-service"
             mock_settings.observability.OTEL_CONSOLE_EXPORT = False  # Default to False to prevent noise
+            mock_settings.observability.OTEL_TRACE_ID_FROM_RUN_ID = True
             mock_settings.app.VERSION = "1.0.0"
             mock_settings.app.ENV_MODE = "TEST"
 
@@ -184,8 +184,8 @@ class TestOpenTelemetryProviderSetup:
         id_generator = mock_deps["tp"].call_args.kwargs["id_generator"]
         assert isinstance(id_generator, RunIdAwareIdGenerator)
         assert mock_deps["tp"].call_args.kwargs["resource"] == mock_deps["resource"].create.return_value
-        # Sampler must be the run-aware one so ratio sampling hashes UUID trace ids.
-        assert mock_deps["tp"].call_args.kwargs["sampler"].get_description() == get_run_aware_sampler().get_description()
+        # Stock OTEL env sampler; we do not inject a custom ratio sampler.
+        assert "sampler" not in mock_deps["tp"].call_args.kwargs
 
     def test_setup_attaches_configured_targets(self, mock_deps):
         """Test that exporters from targets are attached to the tracer."""

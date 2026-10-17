@@ -11,6 +11,7 @@ from redis import TimeoutError as RedisTimeoutError
 from aegra_api.core.active_runs import active_runs, explicit_run_cancellations
 from aegra_api.models.auth import User
 from aegra_api.models.run_job import RunBehavior, RunExecution, RunIdentity, RunJob
+from aegra_api.observability.span_enrichment import _run_trace_id
 from aegra_api.services.run_executor import _shutdown_cancellations, _timeout_cancellations
 from aegra_api.services.worker_executor import (
     WorkerExecutor,
@@ -345,11 +346,20 @@ class TestIsRunTerminal:
 
 
 class TestRestoreTraceContext:
+    def setup_method(self) -> None:
+        _run_trace_id.set(None)
+
+    def teardown_method(self) -> None:
+        _run_trace_id.set(None)
+
     def test_sets_structlog_context_vars(self) -> None:
         job = _make_run_job()
         trace = {"correlation_id": "req-abc"}
 
-        with patch(f"{MODULE}.set_trace_context") as mock_set_trace:
+        with (
+            patch(f"{MODULE}.prepare_run_otel_trace"),
+            patch(f"{MODULE}.set_trace_context") as mock_set_trace,
+        ):
             _restore_trace_context("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", job, trace)
 
         mock_set_trace.assert_called_once()

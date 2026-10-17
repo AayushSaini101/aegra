@@ -13,7 +13,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
 from aegra_api.observability.base import ObservabilityProvider
-from aegra_api.observability.sampling import get_run_aware_sampler
+from aegra_api.observability.sampling import configure_trace_id_from_run_id
 from aegra_api.observability.span_enrichment import RunIdAwareIdGenerator, SpanEnrichmentProcessor
 from aegra_api.observability.targets import (
     BaseOtelTarget,
@@ -98,12 +98,12 @@ class OpenTelemetryProvider(ObservabilityProvider):
             }
         )
 
+        # Ratio samplers + UUID(run_id) seeds conflict; fall back to random ids.
+        configure_trace_id_from_run_id(enabled_by_settings=settings.observability.OTEL_TRACE_ID_FROM_RUN_ID)
+
         self._tracer_provider = TracerProvider(
             resource=resource,
             id_generator=RunIdAwareIdGenerator(),
-            # Ratio samplers must hash seeded UUID trace_ids; raw TraceIdRatioBased
-            # sees biased low-64 bits and drops/keeps every run (see sampling.py).
-            sampler=get_run_aware_sampler(),
         )
         self._tracer_provider.add_span_processor(SpanEnrichmentProcessor())
         processors_count = 0

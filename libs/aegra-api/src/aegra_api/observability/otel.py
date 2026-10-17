@@ -98,7 +98,6 @@ class OpenTelemetryProvider(ObservabilityProvider):
             }
         )
 
-        # Ratio samplers + UUID(run_id) seeds conflict; fall back to random ids.
         configure_trace_id_from_run_id(enabled_by_settings=settings.observability.OTEL_TRACE_ID_FROM_RUN_ID)
 
         self._tracer_provider = TracerProvider(

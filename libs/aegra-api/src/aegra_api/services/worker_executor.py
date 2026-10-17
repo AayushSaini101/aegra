@@ -604,8 +604,6 @@ def _restore_trace_context(run_id: str, job: RunJob, trace: dict[str, str]) -> N
     if original_request_id:
         correlation_id.set(original_request_id)
 
-    # Same reset+seed policy as make_run_trace_context so an ambient parent
-    # in the worker task cannot skip IdGenerator and break deterministic ids.
     prepare_run_otel_trace(run_id)
 
     system_metadata: dict[str, str | int | float | bool] = {

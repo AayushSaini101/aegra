@@ -314,7 +314,6 @@ class ObservabilitySettings(EnvBase):
     OTEL_SERVICE_NAME: str = "aegra-backend"
     OTEL_TARGETS: str = ""  # Comma-separated: "LANGFUSE,PHOENIX"
     OTEL_CONSOLE_EXPORT: bool = False  # For local debugging
-    # Seed OTEL trace_id from run_id (disabled automatically when a ratio sampler is set).
     OTEL_TRACE_ID_FROM_RUN_ID: bool = True
 
     # --- Generic OTLP Target (Default/Custom) ---

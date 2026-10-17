@@ -50,8 +50,6 @@ _trace_attrs: contextvars.ContextVar[dict[str, str | int | float | bool] | None]
     "aegra_otel_trace_attrs", default=None
 )
 
-# When set, RunIdAwareIdGenerator returns this int as trace_id for every
-# root span created in the run's task context (sticky for the task lifetime).
 _run_trace_id: contextvars.ContextVar[int | None] = contextvars.ContextVar("aegra_run_trace_id", default=None)
 
 
@@ -179,20 +177,18 @@ def merge_run_metadata(
 
 
 def seed_otel_trace_id(run_id: str) -> None:
-    """Plant ``UUID(run_id).int`` for :class:`RunIdAwareIdGenerator` (sticky per task)."""
     _run_trace_id.set(uuid.UUID(run_id).int)
 
 
 def prepare_run_otel_trace(run_id: str) -> None:
-    """Clear ambient parents; seed ``trace_id`` from ``run_id`` when policy allows."""
-    # Token intentionally leaked: only call inside ctx.run(...) or a per-job task.
+    # attach() token is intentionally not detached — only call in ctx.run / per-job task.
     otel_context.attach(trace.set_span_in_context(trace.INVALID_SPAN))
     if is_trace_id_from_run_id_enabled():
         seed_otel_trace_id(run_id)
 
 
 class RunIdAwareIdGenerator(IdGenerator):
-    """Returns seeded ``UUID(run_id).int`` when set; otherwise a random trace_id."""
+    """Seeded ``UUID(run_id).int`` when set; otherwise random."""
 
     def generate_trace_id(self) -> int:
         seeded = _run_trace_id.get()

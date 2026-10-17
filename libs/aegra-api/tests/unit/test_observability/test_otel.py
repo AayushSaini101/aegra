@@ -184,7 +184,6 @@ class TestOpenTelemetryProviderSetup:
         id_generator = mock_deps["tp"].call_args.kwargs["id_generator"]
         assert isinstance(id_generator, RunIdAwareIdGenerator)
         assert mock_deps["tp"].call_args.kwargs["resource"] == mock_deps["resource"].create.return_value
-        # Stock OTEL env sampler; we do not inject a custom ratio sampler.
         assert "sampler" not in mock_deps["tp"].call_args.kwargs
 
     def test_setup_attaches_configured_targets(self, mock_deps):

@@ -3,6 +3,7 @@
 import asyncio
 import contextvars
 import logging
+import os
 import uuid
 from unittest.mock import MagicMock
 
@@ -31,6 +32,19 @@ from aegra_api.observability.span_enrichment import (
 
 _RUN_ID = "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"
 _RUN_ID_2 = "bbbbbbbb-2222-3333-4444-cccccccccccc"
+
+
+def _clear_ratio_sampler_env() -> tuple[str | None, str | None]:
+    prev_sampler = os.environ.pop("OTEL_TRACES_SAMPLER", None)
+    prev_arg = os.environ.pop("OTEL_TRACES_SAMPLER_ARG", None)
+    return prev_sampler, prev_arg
+
+
+def _restore_ratio_sampler_env(prev_sampler: str | None, prev_arg: str | None) -> None:
+    if prev_sampler is not None:
+        os.environ["OTEL_TRACES_SAMPLER"] = prev_sampler
+    if prev_arg is not None:
+        os.environ["OTEL_TRACES_SAMPLER_ARG"] = prev_arg
 
 
 class TestSetTraceContext:
@@ -225,6 +239,7 @@ class TestMakeRunTraceContext:
 
     def setup_method(self) -> None:
         """Reset context vars before each test."""
+        self._prev_sampler, self._prev_arg = _clear_ratio_sampler_env()
         reset_trace_id_seeding_for_tests()
         configure_trace_id_from_run_id(enabled_by_settings=True)
         _trace_attrs.set(None)
@@ -234,6 +249,7 @@ class TestMakeRunTraceContext:
     def teardown_method(self) -> None:
         _run_trace_id.set(None)
         reset_trace_id_seeding_for_tests()
+        _restore_ratio_sampler_env(self._prev_sampler, self._prev_arg)
 
     def test_returned_context_contains_expected_attributes(self) -> None:
         """Returned context has all trace attributes pre-set."""
@@ -337,6 +353,7 @@ class TestRunIdAwareIdGenerator:
     """Tests for deterministic trace_id seeding."""
 
     def setup_method(self) -> None:
+        self._prev_sampler, self._prev_arg = _clear_ratio_sampler_env()
         reset_trace_id_seeding_for_tests()
         configure_trace_id_from_run_id(enabled_by_settings=True)
         _run_trace_id.set(None)
@@ -344,6 +361,7 @@ class TestRunIdAwareIdGenerator:
     def teardown_method(self) -> None:
         _run_trace_id.set(None)
         reset_trace_id_seeding_for_tests()
+        _restore_ratio_sampler_env(self._prev_sampler, self._prev_arg)
 
     def test_returns_seeded_trace_id_without_consuming(self) -> None:
         """Sticky seed: factory + graph roots both get UUID(run_id).int."""
@@ -504,6 +522,7 @@ class TestSpanEnrichmentEndToEnd:
     """
 
     def setup_method(self) -> None:
+        self._prev_sampler, self._prev_arg = _clear_ratio_sampler_env()
         reset_trace_id_seeding_for_tests()
         configure_trace_id_from_run_id(enabled_by_settings=True)
         _trace_attrs.set(None)
@@ -521,6 +540,7 @@ class TestSpanEnrichmentEndToEnd:
         _trace_attrs.set(None)
         _run_trace_id.set(None)
         reset_trace_id_seeding_for_tests()
+        _restore_ratio_sampler_env(self._prev_sampler, self._prev_arg)
 
     def _emit_root_span(self, ctx: contextvars.Context) -> None:
         """Open and close a root span inside the supplied context."""
